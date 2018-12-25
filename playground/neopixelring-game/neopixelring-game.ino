@@ -1,7 +1,6 @@
 // "Shoot" lights to the neopixel ring. If the light position is already occupied => GAME OVER!
 // Potential variants:
 //   1. Allow light to wander in both directions.
-
 #include <Adafruit_NeoPixel.h>
 #include <Button.h>
 
@@ -16,7 +15,13 @@ Button button(3);
   
 // When we setup the NeoPixel library, we tell it how many pixels, and which pin to use to send signals.
 Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUM_PIXELS, PIN, NEO_GRB + NEO_KHZ800);
-  
+
+// Game/Application states, mapped to some functions
+typedef enum {STATE_IDLE = 0, STATE_PLAYING = 1, STATE_DYING = 2} GameState;
+GameState gameState = -1;
+void (*stateTable[])() = {idleLoop, gameLoop, dyingLoop};
+void (*lightRenderStateTable[])() {idlingLights, playingLights, dyingLights};
+
 static const int START_PIXEL_INDEX = 0;
 static const int START_LEVEL_UPDATE_INTERVAL = 250;
   
@@ -27,12 +32,9 @@ static int updateIntervalMS = START_LEVEL_UPDATE_INTERVAL;
 static int numActiveLights = 0;
 static int activeLights[24] = {};
 
-static const int GAME_STATE_PLAYING = 10;
-static const int GAME_STATE_DYING   = 11;
-static const int GAME_STATE_IDLE    = 12;
-
 static int currentLevel = 0;
-static int gameState = 0;// NOT SET
+
+static int collectedLights = 0;
 
 void setup() {
   pixels.begin();
@@ -41,55 +43,52 @@ void setup() {
   while (!Serial) { };
   Serial.begin(19200);
 
-  enterState(GAME_STATE_IDLE);
+  enterState(STATE_IDLE);
 }
 
-bool enterState(int state) {
-  if (gameState == state) {
+bool enterState(GameState nextState) {
+  if (gameState == nextState) {
     return false;
   }
   
-  if (state == GAME_STATE_IDLE) {
+  if (nextState == STATE_IDLE) {
     updateIntervalMS = START_LEVEL_UPDATE_INTERVAL;
     clearLights(true);
     numActiveLights = 0;
-  } else if (state == GAME_STATE_PLAYING){
+  } else if (nextState == STATE_PLAYING){
     // Start game with first shot
     currentLevel = 1;
     clearLights(true);
     numActiveLights = 0;
     fireLight(); 
-  } else if (state == GAME_STATE_DYING){
+  } else if (nextState == STATE_DYING){
+    collectedLights = 0;
     Serial.println("GAME OVER");
     Serial.println(numActiveLights);
   }
 
-  gameState = state;  
+  gameState = nextState;  
   return true;
 }
 
 void loop() {
-  if (gameState == GAME_STATE_IDLE) {
-    idleLoop();
-  } else if (gameState == GAME_STATE_PLAYING) {
-    gameLoop();
-  } else if (gameState == GAME_STATE_DYING) {
-    dyingLoop();
-  }
+  stateTable[gameState]();
 }
 
 void idleLoop() {
   if (button.pressed()) {
-    enterState(GAME_STATE_PLAYING);
+    enterState(STATE_PLAYING);
   }
+  
+  lightsLoop();
 }
 
 void dyingLoop() {
   if (button.pressed()) {
-    enterState(GAME_STATE_IDLE);
+    enterState(STATE_IDLE);
   }
   
-  lightsGameLoop(pixels.Color(255,0,0));
+  lightsLoop();
 }
 
 void gameLoop() {
@@ -98,7 +97,7 @@ void gameLoop() {
     
     if (!fired) {
       // Not able to fire -> game over!
-      enterState(GAME_STATE_DYING);
+      enterState(STATE_DYING);
     } else {
       Serial.println("NICE SHOT!");
       Serial.println(numActiveLights);
@@ -106,25 +105,59 @@ void gameLoop() {
     }
   }
   
-  lightsGameLoop(pixels.Color(0,255,0));
+  lightsLoop();
 }
 
-void lightsGameLoop(uint32_t lightColor) {
-  currentMS = millis();
+void levelUp() {
+  currentLevel++;
 
+  // Increase speed every third level (if possible)
+  if (currentLevel%3 == 0 && updateIntervalMS > 25) {
+    Serial.println("Speed increase!!");
+    updateIntervalMS -= 25;
+  }
+}
+
+void lightsLoop() {
+  currentMS = millis();
+  
   if ((currentMS - lastUpdateMS) >= updateIntervalMS) {
     clearLights();
-    
-    for (int i=0; i<numActiveLights; i++) {
+    lightRenderStateTable[gameState]();  
+    pixels.show();
+    lastUpdateMS = currentMS;
+  }
+}
+
+void idlingLights() {
+  pixels.setPixelColor(random(23), pixels.Color(random(255),random(255),random(255)));
+}
+
+void playingLights() {
+  for (int i=0; i<numActiveLights; i++) {
+    activeLights[i] += 1;
+    //wrap
+    if (activeLights[i] >= NUM_PIXELS) {
+      activeLights[i] = 0;
+    }
+    pixels.setPixelColor(activeLights[i], pixels.Color(0,255,0));
+  }
+}
+
+// Stack up all lights so its easy to count them. And make em dead red!
+void dyingLights() {
+  for (int i=0; i<numActiveLights; i++) {
+    if (activeLights[i] < NUM_PIXELS-collectedLights-1) {
       activeLights[i] += 1;
+      //wrap
       if (activeLights[i] >= NUM_PIXELS) {
         activeLights[i] = 0;
       }
-      pixels.setPixelColor(activeLights[i], lightColor);
     }
-    
-    pixels.show();
-    lastUpdateMS = currentMS; 
+    if (activeLights[i] == NUM_PIXELS-collectedLights-1) {
+      collectedLights++;
+    }
+    pixels.setPixelColor(activeLights[i], pixels.Color(255,0,0));
   }
 }
 
@@ -152,14 +185,4 @@ void clearLights(bool render) {
   }
   if (render)
     pixels.show();
-}
-
-void levelUp() {
-  currentLevel++;
-
-  // Increase speed every third level (if possible)
-  if (currentLevel%3 == 0 && updateIntervalMS > 25) {
-    Serial.println("Speed increase!!");
-    updateIntervalMS -= 25;
-  }
 }
