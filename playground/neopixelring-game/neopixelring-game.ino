@@ -2,25 +2,25 @@
 // Potential variants:
 //   1. Allow light to wander in both directions.
 #include <Adafruit_NeoPixel.h>
-#include <Button.h>
+#include <JC_Button.h>
 
-// Connect button between pin 3 and GND
-Button button(3); 
+// Pin connected to the action button
+#define BUTTON_PIN    3
+// Pin connected to NeoPixel ring
+#define NEOPIXEL_PIN  2
+// Num NeoPixels in ring 
+#define NUM_PIXELS    24
   
-// Which pin on the Arduino is connected to the NeoPixels?
-#define PIN         2
-  
-// Num neopixels attached to the Arduino 
-#define NUM_PIXELS  24
-  
+// Button with 10ms debounce
+Button button(BUTTON_PIN, 10);
 // When we setup the NeoPixel library, we tell it how many pixels, and which pin to use to send signals.
-Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUM_PIXELS, PIN, NEO_GRB + NEO_KHZ800);
+Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUM_PIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
 // Game/Application states, mapped to some functions
-typedef enum {STATE_IDLE = 0, STATE_PLAYING = 1, STATE_DYING = 2} GameState;
+typedef enum {STATE_IDLE = 0, STATE_PLAYING = 1, STATE_GAMEOVER = 2} GameState;
 GameState gameState = -1;
-void (*stateTable[])() = {idleLoop, gameLoop, dyingLoop};
-void (*lightRenderStateTable[])() {idlingLights, playingLights, dyingLights};
+void (*stateTable[])() = {idleLoop, gameLoop, gameOverLoop};
+void (*lightRenderStateTable[])() {idlingLights, playingLights, gameOverLights};
 
 static const int START_PIXEL_INDEX = 0;
 static const int START_LEVEL_UPDATE_INTERVAL = 250;
@@ -61,7 +61,7 @@ bool enterState(GameState nextState) {
     clearLights(true);
     numActiveLights = 0;
     fireLight(); 
-  } else if (nextState == STATE_DYING){
+  } else if (nextState == STATE_GAMEOVER){
     collectedLights = 0;
     Serial.println("GAME OVER");
     Serial.println(numActiveLights);
@@ -72,19 +72,20 @@ bool enterState(GameState nextState) {
 }
 
 void loop() {
+  button.read();
   stateTable[gameState]();
 }
 
 void idleLoop() {
-  if (button.pressed()) {
+  if (button.wasPressed()) {
     enterState(STATE_PLAYING);
   }
   
   lightsLoop();
 }
 
-void dyingLoop() {
-  if (button.pressed()) {
+void gameOverLoop() {
+  if (button.wasPressed()) {
     enterState(STATE_IDLE);
   }
   
@@ -92,12 +93,12 @@ void dyingLoop() {
 }
 
 void gameLoop() {
-  if (button.pressed()) {
+  if (button.wasPressed()) {
     bool fired = fireLight();
     
     if (!fired) {
       // Not able to fire -> game over!
-      enterState(STATE_DYING);
+      enterState(STATE_GAMEOVER);
     } else {
       Serial.println("NICE SHOT!");
       Serial.println(numActiveLights);
@@ -145,7 +146,7 @@ void playingLights() {
 }
 
 // Stack up all lights so its easy to count them. And make em dead red!
-void dyingLights() {
+void gameOverLights() {
   for (int i=0; i<numActiveLights; i++) {
     if (activeLights[i] < NUM_PIXELS-collectedLights-1) {
       activeLights[i] += 1;
