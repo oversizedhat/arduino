@@ -27,9 +27,8 @@ static int timeoutMS = 3000;;
 
 int questionIndex = 0;
 
-int playerOneScore = 0;
+int playerScores[2] = {0,0};
 char playerOneScoreText[3];
-int playerTwoScore = 0;
 char playerTwoScoreText[3];
 
 char currentQuestion[20];
@@ -61,8 +60,8 @@ void setup() {
 
 void reset() {
   questionIndex = 0;
-  playerOneScore = 0;
-  playerTwoScore = 0;
+  playerScores[0] = 0;
+  playerScores[1] = 0;
   
   setNextQuestion();
 }
@@ -155,19 +154,19 @@ void menuRender() {
 }
 
 void gameLoop() {
+  int player = 0;
+  
   if (playerOne.wasPressed()) {
-    if (currentQuestionIsCorrect) {
-      playerOneScore++;
-    } else {
-      playerOneScore-=2;
-    }
-    enterState(STATE_PLAYING_WAIT);
-
+    player = 1;
   } else if (playerTwo.wasPressed()) {
+    player = 2;
+  }
+
+  if (player > 0) {
     if (currentQuestionIsCorrect) {
-      playerTwoScore++;
+      playerScores[player-1] += 1;
     } else {
-      playerTwoScore-=2;
+      playerScores[player-1] -= 2;
     }
     enterState(STATE_PLAYING_WAIT);
   }
@@ -183,12 +182,12 @@ void gameRender() {
   oled.drawStr(30,24,currentQuestion);
 
   //oled.setFont(u8g_font_unifont);
-  oled.drawStr(10,    60, itoa(playerOneScore,playerOneScoreText, 10));
-  oled.drawStr(128-26,60, itoa(playerTwoScore,playerTwoScoreText, 10));
+  oled.drawStr(10,    60, itoa(playerScores[0],playerOneScoreText, 10));
+  oled.drawStr(128-26,60, itoa(playerScores[1],playerTwoScoreText, 10));
 }
 
 void gameWaitLoop() {
-  if (playerOneScore >= WIN_SCORE || playerTwoScore >= WIN_SCORE) {
+  if (playerScores[0] >= WIN_SCORE || playerScores[1] >= WIN_SCORE) {
     enterState(STATE_GAMEOVER);
   }
 
@@ -211,7 +210,7 @@ void gameOverLoop() {
 void gameOverRender() {
   oled.setFont(u8g_font_unifont);
  
-  if (playerOneScore > playerTwoScore) {
+  if (playerScores[0] > playerScores[1]) {
     oled.drawStr(0,24,"P1 WINS!");
   } else {
     oled.drawStr(0,24,"P2 WINS!");
