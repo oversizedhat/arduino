@@ -1,6 +1,7 @@
 #include <MD_Parola.h>
 #include <MD_MAX72xx.h>
 #include <SPI.h>
+#include "LedControl.h"
 
 #define MUTE 0
 #define SCROLL_TEXT "Ho Ho Ho! Merry X-mas! GOD JUL! "
@@ -21,6 +22,20 @@
 // Buzzer
 #define BUZZER_PIN  2
 
+// Light led
+#define LIGHT_LED_PIN 11
+
+// Number of idle snowflakes
+#define NUM_SNOWFLAKES 6
+
+/** LedControl for snowflakes
+ pin 12 is connected to the DataIn 
+ pin 11 is connected to the CLK 
+ pin 10 is connected to LOAD 
+ We have only a single MAX72XX.
+ */
+LedControl lc=LedControl(6,4,5,1);
+
 // Jingle Bells!
 int toneLengthMillis = 200;
 int toneGapMillis = 80;
@@ -37,28 +52,41 @@ int currentNote = 0;
 int lastNoteMillis = 0;
 int nextNoteDelayMillis = 0;
 
+// Idle state (snowflakes)
+int snowflakes[NUM_SNOWFLAKES] = {-5,-1,-3,-6,-8,1};
+int snowflakeCols[NUM_SNOWFLAKES] = {1,4,3,2,5,6};
+int sensorUpdateIntervalMS = 200;
+int lastSensorUpdateMS = 0;
+
 // States
 enum HouseState {
+  BOOT,
   IDLE,
   PARTY
 };
-HouseState state = IDLE;
+HouseState state = BOOT;
 
 // LED helper
 MD_Parola P = MD_Parola(HARDWARE_TYPE, DATA_PIN, CLK_PIN, CS_PIN, MAX_DEVICES);
 
 void setup() {
   P.begin();
+  
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   pinMode(BUZZER_PIN, OUTPUT);
-
+  pinMode(LIGHT_LED_PIN, OUTPUT);
+  
   Serial.begin(9600);
+
+  delay(1000);
+
+  changeState(IDLE);
 }
 
 void loop() {
   if (state == PARTY) {
-    play();
+    party();
   } else {
     idle();
   }
@@ -67,49 +95,65 @@ void loop() {
 void changeState(HouseState nextState) {
   Serial.println("changeState()");
   if (nextState != state) {
-    state = nextState;
     Serial.print("State changed:");
     Serial.println(state);
 
     if (state == PARTY) {
-      lastNoteMillis = 0;
-      currentNote = 0;
-    } else if (state == IDLE) {
-      noTone(BUZZER_PIN);
-        
       P.displayClear();
       P.displayReset();
     }
+
+    if (nextState == PARTY) {
+      lastNoteMillis = 0;
+      currentNote = 0;
+      
+      P.setIntensity(8);
+
+    } else if (nextState == IDLE) {
+      digitalWrite(LIGHT_LED_PIN, HIGH);
+      noTone(BUZZER_PIN);
+      
+      P.setIntensity(1);
+    }
+
+    state = nextState;
+
+    delay(100);
   }
 }
 
 void idle() {
-  // The distance between sensor and obstacle (cm): 
-  // distance = travel_distance / 2 = 0.034 × pulse_duration / 2 = 0.017 × pulse_duration
-  // generate 10-microsecond pulse to TRIG pin
-  digitalWrite(TRIG_PIN, HIGH);
-  delayMicroseconds(10);
-  digitalWrite(TRIG_PIN, LOW);
+  int currMillis = millis();
 
-  // measure duration of pulse from ECHO pin
-  int duration_us = pulseIn(ECHO_PIN, HIGH);
+  if ((currMillis-lastSensorUpdateMS) >= sensorUpdateIntervalMS) {
+    // The distance between sensor and obstacle (cm): 
+    // distance = travel_distance / 2 = 0.034 × pulse_duration / 2 = 0.017 × pulse_duration
+    // generate 10-microsecond pulse to TRIG pin
+    digitalWrite(TRIG_PIN, HIGH);
+    delayMicroseconds(10);
+    digitalWrite(TRIG_PIN, LOW);
 
-  // calculate the distance
-  int distance_cm = 0.017 * duration_us;
+    // measure duration of pulse from ECHO pin
+    int duration_us = pulseIn(ECHO_PIN, HIGH);
 
-  // print the value to Serial Monitor
-  Serial.print("distance: ");
-  Serial.print(distance_cm);
-  Serial.println(" cm");
+    // calculate the distance
+    int distance_cm = 0.017 * duration_us;
 
-  if (duration_us>0 && distance_cm <= DISTANCE_TO_ACTIVATE_CM) {
-    changeState(PARTY);
-  } else {  
-    delay(UPDATE_INTERVAL_MS);
+    // print the value to Serial Monitor
+    //Serial.print("distance: ");
+    //Serial.print(distance_cm);
+    //Serial.println(" cm");
+
+    if (duration_us>0 && distance_cm <= DISTANCE_TO_ACTIVATE_CM) {
+      changeState(PARTY);
+    } else {  
+      updateSnowflakes();
+    }
+    lastSensorUpdateMS = millis();
   }
 }
 
-void play() {
+void party() {
   int currMillis = millis();
   
   if (P.displayAnimate()) {
@@ -124,8 +168,27 @@ void play() {
     nextNoteDelayMillis = (duration[currentNote] * toneLengthMillis) + (duration[currentNote] * toneGapMillis);
     currentNote++;
 
+    bool now = digitalRead(LIGHT_LED_PIN);
+    digitalWrite(LIGHT_LED_PIN, !now);
+
     if (currentNote >= totNotes) {
       changeState(IDLE);
+    }
+  }
+}
+
+void updateSnowflakes() {
+  lc.clearDisplay(0);
+
+  for (int i=0; i<NUM_SNOWFLAKES; i++) {
+    if (snowflakes[i] < 7) {
+      snowflakes[i] = snowflakes[i] + 1;
+      if (snowflakes[i] >= 0) {
+        lc.setLed(0,snowflakeCols[i],snowflakes[i], true);
+      }
+    } else {
+      snowflakes[i] = random(-10, -1);
+      snowflakeCols[i] = random(0, 7);
     }
   }
 }
